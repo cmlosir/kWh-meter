@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>kWh 電度錶互動模擬</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        button { touch-action: manipulation; }
+        
+        @keyframes rotate-disk {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        .meter-disk-rotating {
+            animation: rotate-disk var(--rotation-speed) linear infinite;
+        }
+        .indicator-flash {
+            animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; filter: brightness(1.2) scale(1.1); }
+            50% { opacity: 0.6; filter: brightness(0.8) scale(1); }
+        }
+        
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 8px;
+            cursor: pointer;
+            background: #e2e8f0;
+            border-radius: 4px;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            height: 24px;
+            width: 24px;
+            border-radius: 50%;
+            background: #4f46e5;
+            cursor: pointer;
+            -webkit-appearance: none;
+            margin-top: -8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .formula-box {
+            font-size: 1.25rem;
+            line-height: 1.75rem;
+            font-weight: 700;
+            color: #1e40af;
+        }
+        .step-tag {
+            background-color: #dbeafe;
+            color: #1e40af;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-right: 4px;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 font-sans text-slate-900 antialiased">
+
+    <div class="max-w-md mx-auto md:max-w-4xl p-3 md:p-6 pb-24">
+        <header class="text-center mb-6 bg-indigo-700 text-white p-5 rounded-2xl shadow-lg">
+            <h1 class="text-xl md:text-3xl font-bold italic">kWh Meter Simulator</h1>
+            <p class="text-sm opacity-80 uppercase tracking-widest">能量與家用電費計算模擬器</p>
+        </header>
+
+        <div class="flex flex-col md:flex-row gap-6">
+            <div class="w-full md:w-1/2 space-y-4">
+                <div class="sticky top-4 space-y-4">
+                    <!-- 電度錶面板 -->
+                    <div class="bg-slate-900 rounded-3xl p-5 text-white shadow-xl border-t-8 border-slate-700">
+                        <div class="flex justify-between items-center mb-3">
+                            <div class="bg-slate-800 px-3 py-1 rounded-full text-[10px] font-mono text-indigo-300 border border-indigo-900/50">
+                                AC KILOWATT-HOUR METER
+                            </div>
+                            <div id="statusIndicator" class="flex items-center gap-2">
+                                <div class="w-3 h-3 rounded-full bg-slate-600"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-emerald-50 text-slate-900 p-4 rounded-xl flex flex-col items-center shadow-inner mb-4">
+                            <div class="text-4xl md:text-5xl font-mono tracking-tight font-bold">
+                                <span id="displayKwh">000.000</span>
+                            </div>
+                            <div class="text-xs font-bold text-slate-400 mt-1 text-center uppercase tracking-widest font-sans">kWh (累積度數)</div>
+                        </div>
+                        
+                        <div class="relative h-14 bg-slate-800 rounded-lg border border-slate-700 overflow-hidden flex items-center justify-center">
+                            <div id="meterDisk" class="absolute w-[300%] h-1 bg-[repeating-linear-gradient(90deg,#475569,#475569_30px,#1e293b_30px,#1e293b_60px)] opacity-60"></div>
+                            <div class="absolute left-1/2 -translate-x-1/2 w-1.5 h-full bg-rose-500 z-10 shadow-[0_0_10px_rgba(244,63,94,0.5)]"></div>
+                        </div>
+                        
+                        <div class="mt-5 grid grid-cols-2 gap-3 text-center">
+                            <div class="bg-white/5 p-3 rounded-xl border border-white/10">
+                                <p class="text-[10px] text-slate-400 uppercase">即時功率</p>
+                                <p class="text-lg font-bold text-yellow-400"><span id="currentWatts">0</span> W</p>
+                            </div>
+                            <div class="bg-white/5 p-3 rounded-xl border border-white/10">
+                                <p class="text-[10px] text-slate-400 uppercase">總累積電費</p>
+                                <p class="text-lg font-bold text-emerald-400">$<span id="currentCost">0.00</span></p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 控制區域 -->
+                    <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                        <div class="flex flex-col items-center mb-6">
+                            <div class="text-3xl font-mono font-bold text-indigo-600 mb-1" id="timerDisplay">00:00:00</div>
+                            <p class="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-4">Total Elapsed Time (累積時間)</p>
+                            
+                            <div class="w-full bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="text-xs font-bold text-slate-500">模擬速度控制 (Speed)</span>
+                                    <span class="bg-indigo-600 text-white text-xs font-bold px-2 py-1 rounded" id="speedValueDisplay">1.0x</span>
+                                </div>
+                                <input type="range" id="speedSlider" min="0" max="10" step="0.5" value="1" class="mb-1">
+                                <div class="flex justify-between text-[10px] text-slate-400 font-bold px-1">
+                                    <span>0x (暫停)</span>
+                                    <span>5x</span>
+                                    <span>10x (最快)</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <button id="toggleBtn" class="h-14 bg-indigo-600 active:bg-indigo-800 text-white font-bold rounded-xl shadow-md transition-all text-lg">
+                                開啟電源
+                            </button>
+                            <button id="resetBtn" class="h-14 bg-slate-100 active:bg-slate-200 text-slate-600 font-bold rounded-xl border border-slate-200">
+                                全部重設
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="w-full md:w-1/2 space-y-4">
+                <!-- 電器選擇區 -->
+                <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                    <h2 class="font-bold text-slate-700 mb-4 flex items-center gap-2">
+                        <span class="w-2 h-2 bg-indigo-500 rounded-full"></span> 選擇電器開始模擬
+                    </h2>
+                    <div class="grid grid-cols-1 gap-2" id="applianceContainer"></div>
+                </div>
+
+                <!-- 公式區 -->
+                <div class="bg-white p-5 rounded-2xl shadow-sm border-2 border-indigo-200">
+                    <h2 class="font-bold text-indigo-700 mb-4 text-base flex items-center gap-2 justify-center">
+                        ⭐ 核心計算公式
+                    </h2>
+                    <div class="space-y-4">
+                        <div class="p-4 bg-blue-50 rounded-xl">
+                            <p class="text-xs text-blue-600 font-bold mb-1 underline text-center">1. 用電量 (Energy)</p>
+                            <div class="formula-box text-center py-1">
+                                kWh = kW × hr
+                            </div>
+                            <p class="text-[10px] text-blue-400 mt-1 text-center font-bold">kW = W ÷ 1000 | hr = 秒 ÷ 3600</p>
+                        </div>
+                        <div class="p-4 bg-emerald-50 rounded-xl">
+                            <p class="text-xs text-emerald-600 font-bold mb-1 underline text-center">2. 電費計算 (Cost)</p>
+                            <div class="formula-box text-center py-1">
+                                $ = kWh × $1.2
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 詳解彈窗 -->
+    <div id="modal" class="fixed inset-0 bg-slate-900/90 hidden items-center justify-center z-[100] p-4 backdrop-blur-sm">
+        <div class="bg-white p-6 md:p-8 rounded-3xl max-w-lg w-full shadow-2xl overflow-y-auto max-h-[90vh]">
+            <div id="modalIcon" class="flex justify-center mb-4"></div>
+            <h2 id="modalTitle" class="text-2xl font-bold mb-4 text-center text-indigo-700 underline">累積電費計算詳解</h2>
+            <div id="calculationSteps" class="space-y-4 text-left border-y border-slate-100 py-4 mb-6"></div>
+            <button id="closeModal" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl active:scale-95 transition-all shadow-lg text-xl">
+                明白了，繼續實驗
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // 風筒圖標 SVG
+        const hairDryerSvg = `<svg class="w-12 h-12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M19 4H11C9.34315 4 8 5.34315 8 7V11C8 12.6569 9.34315 14 11 14H13L13 20C13 21.1046 12.1046 22 11 22C9.89543 22 9 21.1046 9 20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M8 7H4C2.89543 7 2 7.89543 2 9C2 10.1046 2.89543 11 4 11H8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M19 4L22 7L19 10" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="11" cy="7" r="1" fill="currentColor"/>
+            <circle cx="11" cy="11" r="1" fill="currentColor"/>
+        </svg>`;
+
+        const appliances = [
+            { id: 'bulb', power: 60, label: '60W 鎢絲燈泡', icon: '💡', type: 'emoji' },
+            { id: 'dryer', power: 1500, label: '1500W 風筒', icon: hairDryerSvg, type: 'svg' },
+            { id: 'ac', power: 2000, label: '2000W 冷氣機', icon: '❄️', type: 'emoji' }
+        ];
+
+        let state = {
+            isRunning: false,
+            powerW: 0,
+            label: "",
+            icon: "",
+            iconType: "",
+            totalKwh: 0,
+            totalSeconds: 0,
+            rate: 1.2,
+            lastTick: 0,
+            speedMultiplier: 1.0
+        };
+
+        const els = {
+            kwh: document.getElementById('displayKwh'),
+            watts: document.getElementById('currentWatts'),
+            cost: document.getElementById('currentCost'),
+            timer: document.getElementById('timerDisplay'),
+            toggleBtn: document.getElementById('toggleBtn'),
+            disk: document.getElementById('meterDisk'),
+            statusDot: document.querySelector('#statusIndicator div'),
+            speedSlider: document.getElementById('speedSlider'),
+            speedValue: document.getElementById('speedValueDisplay'),
+            modal: document.getElementById('modal'),
+            calculationSteps: document.getElementById('calculationSteps'),
+            modalTitle: document.getElementById('modalTitle'),
+            modalIcon: document.getElementById('modalIcon'),
+            closeModal: document.getElementById('closeModal'),
+            container: document.getElementById('applianceContainer')
+        };
+
+        appliances.forEach(app => {
+            const btn = document.createElement('button');
+            btn.className = "appliance-item flex items-center justify-between p-4 border-2 border-slate-100 rounded-2xl active:scale-[0.98] transition-all bg-white shadow-sm";
+            
+            const iconHtml = app.type === 'svg' ? `<div class="text-indigo-600 scale-75">${app.icon}</div>` : `<span class="text-2xl">${app.icon}</span>`;
+            
+            btn.innerHTML = `
+                <div class="flex items-center gap-3">
+                    ${iconHtml}
+                    <span class="font-bold text-sm text-slate-700">${app.label}</span>
+                </div>
+                <span class="font-mono font-bold text-indigo-600">${app.power}W</span>
+            `;
+            btn.onclick = () => {
+                if (state.isRunning) {
+                    showSimpleAlert("請先關機", "更改電器前，請先點擊「關閉電源」。", "⚠️");
+                    return;
+                }
+                document.querySelectorAll('.appliance-item').forEach(b => b.classList.replace('border-indigo-400', 'border-slate-100'));
+                btn.classList.replace('border-slate-100', 'border-indigo-400');
+                state.powerW = app.power;
+                state.label = app.label;
+                state.icon = app.icon;
+                state.iconType = app.type;
+                updateUI();
+            };
+            els.container.appendChild(btn);
+        });
+
+        els.speedSlider.oninput = (e) => {
+            state.speedMultiplier = parseFloat(e.target.value);
+            els.speedValue.textContent = state.speedMultiplier.toFixed(1) + 'x';
+            updateUI();
+        };
+
+        function showSimpleAlert(title, text, icon) {
+            els.modalTitle.textContent = title;
+            els.modalIcon.innerHTML = `<span class="text-5xl">${icon}</span>`;
+            els.calculationSteps.innerHTML = `<p class="text-center text-slate-600 font-bold">${text}</p>`;
+            els.modal.style.display = 'flex';
+        }
+
+        function showDetailedCalculation(totalSecs, powerW, label, icon, iconType) {
+            const kw = powerW / 1000;
+            const hr = totalSecs / 3600;
+            const kwh = kw * hr;
+            const cost = kwh * state.rate;
+
+            const h_disp = Math.floor(totalSecs / 3600);
+            const m_disp = Math.floor((totalSecs % 3600) / 60);
+            const s_disp = Math.floor(totalSecs % 60);
+
+            els.modalIcon.innerHTML = iconType === 'svg' ? `<div class="text-indigo-600">${icon}</div>` : `<span class="text-5xl">${icon}</span>`;
+            
+            els.calculationSteps.innerHTML = `
+                <div class="bg-indigo-50 p-4 rounded-xl border border-indigo-100 mb-2 text-sm">
+                    <p class="font-bold text-indigo-800">當前電器：${label}</p>
+                    <p class="text-indigo-600 font-bold">累積總時間：${h_disp}時${m_disp}分${s_disp}秒 (${Math.floor(totalSecs)}秒)</p>
+                </div>
+                <div class="space-y-4">
+                    <div>
+                        <p class="text-xs text-slate-500 font-bold mb-1"><span class="step-tag">1</span> 功率換算 (W → kW)</p>
+                        <p class="text-lg font-mono font-bold">${powerW}W ÷ 1000 = <span class="text-blue-600">${kw} kW</span></p>
+                    </div>
+                    <div>
+                        <p class="text-xs text-slate-500 font-bold mb-1"><span class="step-tag">2</span> 時間換算 (秒 → 小時)</p>
+                        <p class="text-lg font-mono font-bold">${Math.floor(totalSecs)}秒 ÷ 3600 = <span class="text-blue-600">${hr.toFixed(5)} hr</span></p>
+                    </div>
+                    <div class="pt-2 border-t border-slate-100">
+                        <p class="text-xs text-slate-500 font-bold mb-1"><span class="step-tag">3</span> 能量 (kWh) = 功率 × 時間</p>
+                        <p class="text-xl font-bold bg-yellow-50 p-2 rounded text-center">
+                            ${kw} kW × ${hr.toFixed(5)} hr = <span class="text-orange-600">${kwh.toFixed(4)} kWh</span>
+                        </p>
+                    </div>
+                    <div class="pt-2 border-t border-slate-100">
+                        <p class="text-xs text-slate-500 font-bold mb-1"><span class="step-tag">4</span> 電費 = 總累積度數 × $1.2</p>
+                        <p class="text-xl font-bold bg-green-50 p-2 rounded text-center">
+                            ${kwh.toFixed(4)} 度 × $1.2 = <span class="text-emerald-600">HK$ ${cost.toFixed(2)}</span>
+                        </p>
+                    </div>
+                </div>
+            `;
+            els.modal.style.display = 'flex';
+        }
+
+        els.closeModal.onclick = () => {
+            els.modal.style.display = 'none';
+        };
+
+        function updateUI() {
+            els.kwh.textContent = state.totalKwh.toFixed(3).padStart(7, '0');
+            els.watts.textContent = state.powerW;
+            els.cost.textContent = (state.totalKwh * state.rate).toFixed(2);
+            
+            const h = Math.floor(state.totalSeconds / 3600);
+            const m = Math.floor((state.totalSeconds % 3600) / 60);
+            const s = Math.floor(state.totalSeconds % 60);
+            els.timer.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+
+            if (state.isRunning && state.speedMultiplier > 0) {
+                const speed = state.powerW > 0 ? (2400 / (state.powerW * state.speedMultiplier)) : 0;
+                els.disk.style.setProperty('--rotation-speed', `${speed}s`);
+                els.disk.classList.add('meter-disk-rotating');
+                els.statusDot.className = "w-3 h-3 rounded-full bg-green-400 shadow-[0_0_10px_#4ade80] indicator-flash";
+                els.toggleBtn.textContent = "關閉電源";
+                els.toggleBtn.classList.replace('bg-indigo-600', 'bg-rose-600');
+            } else {
+                els.disk.classList.remove('meter-disk-rotating');
+                els.statusDot.className = "w-3 h-3 rounded-full bg-slate-600";
+                els.toggleBtn.textContent = "開啟電源";
+                els.toggleBtn.classList.replace('bg-rose-600', 'bg-indigo-600');
+            }
+        }
+
+        els.toggleBtn.onclick = () => {
+            if (state.powerW === 0) {
+                showSimpleAlert("提示", "請先選擇一個電器進行模擬。", "🔌");
+                return;
+            }
+            if (state.isRunning) {
+                state.isRunning = false;
+                updateUI();
+                if (state.totalSeconds > 0) {
+                    showDetailedCalculation(state.totalSeconds, state.powerW, state.label, state.icon, state.iconType);
+                }
+            } else {
+                state.isRunning = true;
+                state.lastTick = Date.now();
+                requestAnimationFrame(tick);
+                updateUI();
+            }
+        };
+
+        function tick() {
+            if (!state.isRunning) return;
+            const now = Date.now();
+            const deltaTime = (now - state.lastTick) / 1000;
+            const simTimeToAdd = deltaTime * state.speedMultiplier;
+            state.totalSeconds += simTimeToAdd;
+            state.totalKwh += (state.powerW / 1000) * (simTimeToAdd / 3600);
+            state.lastTick = now;
+            updateUI();
+            requestAnimationFrame(tick);
+        }
+
+        document.getElementById('resetBtn').onclick = () => {
+            state.isRunning = false;
+            state.totalKwh = 0;
+            state.totalSeconds = 0;
+            updateUI();
+        };
+    </script>
+</body>
+</html>
