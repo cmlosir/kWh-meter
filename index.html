@@ -97,7 +97,7 @@
                         
                         <div class="mt-5 grid grid-cols-2 gap-3 text-center">
                             <div class="bg-white/5 p-3 rounded-xl border border-white/10">
-                                <p class="text-[10px] text-slate-400 uppercase">即時功率</p>
+                                <p class="text-[10px] text-slate-400 uppercase">當前總功率</p>
                                 <p class="text-lg font-bold text-yellow-400"><span id="currentWatts">0</span> W</p>
                             </div>
                             <div class="bg-white/5 p-3 rounded-xl border border-white/10">
@@ -141,9 +141,10 @@
             <div class="w-full md:w-1/2 space-y-4">
                 <!-- 電器選擇區 -->
                 <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
-                    <h2 class="font-bold text-slate-700 mb-4 flex items-center gap-2">
-                        <span class="w-2 h-2 bg-indigo-500 rounded-full"></span> 選擇電器開始模擬
+                    <h2 class="font-bold text-slate-700 mb-2 flex items-center gap-2">
+                        <span class="w-2 h-2 bg-indigo-500 rounded-full"></span> 選擇電器 (可多選)
                     </h2>
+                    <p class="text-[10px] text-slate-400 mb-4">點擊開啟，再次點擊關閉</p>
                     <div class="grid grid-cols-1 gap-2" id="applianceContainer"></div>
                 </div>
 
@@ -175,7 +176,7 @@
     <!-- 詳解彈窗 -->
     <div id="modal" class="fixed inset-0 bg-slate-900/90 hidden items-center justify-center z-[100] p-4 backdrop-blur-sm">
         <div class="bg-white p-6 md:p-8 rounded-3xl max-w-lg w-full shadow-2xl overflow-y-auto max-h-[90vh]">
-            <div id="modalIcon" class="flex justify-center mb-4"></div>
+            <div id="modalIcon" class="flex justify-center mb-4 gap-2"></div>
             <h2 id="modalTitle" class="text-2xl font-bold mb-4 text-center text-indigo-700 underline">累積電費計算詳解</h2>
             <div id="calculationSteps" class="space-y-4 text-left border-y border-slate-100 py-4 mb-6"></div>
             <button id="closeModal" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-2xl active:scale-95 transition-all shadow-lg text-xl">
@@ -185,7 +186,6 @@
     </div>
 
     <script>
-        // 風筒圖標 SVG
         const hairDryerSvg = `<svg class="w-12 h-12" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M19 4H11C9.34315 4 8 5.34315 8 7V11C8 12.6569 9.34315 14 11 14H13L13 20C13 21.1046 12.1046 22 11 22C9.89543 22 9 21.1046 9 20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             <path d="M8 7H4C2.89543 7 2 7.89543 2 9C2 10.1046 2.89543 11 4 11H8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -202,10 +202,7 @@
 
         let state = {
             isRunning: false,
-            powerW: 0,
-            label: "",
-            icon: "",
-            iconType: "",
+            selectedIds: [], // 儲存已選電器的 ID
             totalKwh: 0,
             totalSeconds: 0,
             rate: 1.2,
@@ -231,8 +228,17 @@
             container: document.getElementById('applianceContainer')
         };
 
+        // 計算當前總功率
+        function calculateTotalPower() {
+            return appliances
+                .filter(app => state.selectedIds.includes(app.id))
+                .reduce((sum, app) => sum + app.power, 0);
+        }
+
+        // 初始化電器清單
         appliances.forEach(app => {
             const btn = document.createElement('button');
+            btn.id = `btn-${app.id}`;
             btn.className = "appliance-item flex items-center justify-between p-4 border-2 border-slate-100 rounded-2xl active:scale-[0.98] transition-all bg-white shadow-sm";
             
             const iconHtml = app.type === 'svg' ? `<div class="text-indigo-600 scale-75">${app.icon}</div>` : `<span class="text-2xl">${app.icon}</span>`;
@@ -245,16 +251,17 @@
                 <span class="font-mono font-bold text-indigo-600">${app.power}W</span>
             `;
             btn.onclick = () => {
-                if (state.isRunning) {
-                    showSimpleAlert("請先關機", "更改電器前，請先點擊「關閉電源」。", "⚠️");
-                    return;
+                if (state.selectedIds.includes(app.id)) {
+                    // 已選中，取消選擇
+                    state.selectedIds = state.selectedIds.filter(id => id !== app.id);
+                    btn.classList.replace('border-indigo-500', 'border-slate-100');
+                    btn.classList.remove('bg-indigo-50');
+                } else {
+                    // 未選中，加入選擇
+                    state.selectedIds.push(app.id);
+                    btn.classList.replace('border-slate-100', 'border-indigo-500');
+                    btn.classList.add('bg-indigo-50');
                 }
-                document.querySelectorAll('.appliance-item').forEach(b => b.classList.replace('border-indigo-400', 'border-slate-100'));
-                btn.classList.replace('border-slate-100', 'border-indigo-400');
-                state.powerW = app.power;
-                state.label = app.label;
-                state.icon = app.icon;
-                state.iconType = app.type;
                 updateUI();
             };
             els.container.appendChild(btn);
@@ -273,8 +280,8 @@
             els.modal.style.display = 'flex';
         }
 
-        function showDetailedCalculation(totalSecs, powerW, label, icon, iconType) {
-            const kw = powerW / 1000;
+        function showDetailedCalculation(totalSecs, totalW, selectedApps) {
+            const kw = totalW / 1000;
             const hr = totalSecs / 3600;
             const kwh = kw * hr;
             const cost = kwh * state.rate;
@@ -283,30 +290,38 @@
             const m_disp = Math.floor((totalSecs % 3600) / 60);
             const s_disp = Math.floor(totalSecs % 60);
 
-            els.modalIcon.innerHTML = iconType === 'svg' ? `<div class="text-indigo-600">${icon}</div>` : `<span class="text-5xl">${icon}</span>`;
+            // 組合顯示圖標
+            els.modalIcon.innerHTML = selectedApps.map(app => {
+                return app.type === 'svg' ? `<div class="text-indigo-600 scale-50 -mx-4">${app.icon}</div>` : `<span class="text-3xl">${app.icon}</span>`;
+            }).join('');
             
+            const appListHtml = selectedApps.map(app => `<li>${app.label} (${app.power}W)</li>`).join('');
+
             els.calculationSteps.innerHTML = `
                 <div class="bg-indigo-50 p-4 rounded-xl border border-indigo-100 mb-2 text-sm">
-                    <p class="font-bold text-indigo-800">當前電器：${label}</p>
+                    <p class="font-bold text-indigo-800 mb-1 underline">參與運作電器：</p>
+                    <ul class="list-disc list-inside text-indigo-700 font-bold mb-2">
+                        ${appListHtml}
+                    </ul>
                     <p class="text-indigo-600 font-bold">累積總時間：${h_disp}時${m_disp}分${s_disp}秒 (${Math.floor(totalSecs)}秒)</p>
                 </div>
                 <div class="space-y-4">
                     <div>
-                        <p class="text-xs text-slate-500 font-bold mb-1"><span class="step-tag">1</span> 功率換算 (W → kW)</p>
-                        <p class="text-lg font-mono font-bold">${powerW}W ÷ 1000 = <span class="text-blue-600">${kw} kW</span></p>
+                        <p class="text-xs text-slate-500 font-bold mb-1"><span class="step-tag">1</span> 總功率換算 (W → kW)</p>
+                        <p class="text-lg font-mono font-bold">${totalW}W ÷ 1000 = <span class="text-blue-600">${kw} kW</span></p>
                     </div>
                     <div>
                         <p class="text-xs text-slate-500 font-bold mb-1"><span class="step-tag">2</span> 時間換算 (秒 → 小時)</p>
                         <p class="text-lg font-mono font-bold">${Math.floor(totalSecs)}秒 ÷ 3600 = <span class="text-blue-600">${hr.toFixed(5)} hr</span></p>
                     </div>
                     <div class="pt-2 border-t border-slate-100">
-                        <p class="text-xs text-slate-500 font-bold mb-1"><span class="step-tag">3</span> 能量 (kWh) = 功率 × 時間</p>
+                        <p class="text-xs text-slate-500 font-bold mb-1"><span class="step-tag">3</span> 能量 (kWh) = 總功率 × 時間</p>
                         <p class="text-xl font-bold bg-yellow-50 p-2 rounded text-center">
                             ${kw} kW × ${hr.toFixed(5)} hr = <span class="text-orange-600">${kwh.toFixed(4)} kWh</span>
                         </p>
                     </div>
                     <div class="pt-2 border-t border-slate-100">
-                        <p class="text-xs text-slate-500 font-bold mb-1"><span class="step-tag">4</span> 電費 = 總累積度數 × $1.2</p>
+                        <p class="text-xs text-slate-500 font-bold mb-1"><span class="step-tag">4</span> 電費 = 總度數 × $1.2</p>
                         <p class="text-xl font-bold bg-green-50 p-2 rounded text-center">
                             ${kwh.toFixed(4)} 度 × $1.2 = <span class="text-emerald-600">HK$ ${cost.toFixed(2)}</span>
                         </p>
@@ -321,8 +336,9 @@
         };
 
         function updateUI() {
+            const totalWatts = calculateTotalPower();
             els.kwh.textContent = state.totalKwh.toFixed(3).padStart(7, '0');
-            els.watts.textContent = state.powerW;
+            els.watts.textContent = totalWatts;
             els.cost.textContent = (state.totalKwh * state.rate).toFixed(2);
             
             const h = Math.floor(state.totalSeconds / 3600);
@@ -331,9 +347,14 @@
             els.timer.textContent = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 
             if (state.isRunning && state.speedMultiplier > 0) {
-                const speed = state.powerW > 0 ? (2400 / (state.powerW * state.speedMultiplier)) : 0;
-                els.disk.style.setProperty('--rotation-speed', `${speed}s`);
-                els.disk.classList.add('meter-disk-rotating');
+                // 轉盤旋轉速度
+                const speed = totalWatts > 0 ? (2400 / (totalWatts * state.speedMultiplier)) : 0;
+                if (speed > 0) {
+                    els.disk.style.setProperty('--rotation-speed', `${speed}s`);
+                    els.disk.classList.add('meter-disk-rotating');
+                } else {
+                    els.disk.classList.remove('meter-disk-rotating');
+                }
                 els.statusDot.className = "w-3 h-3 rounded-full bg-green-400 shadow-[0_0_10px_#4ade80] indicator-flash";
                 els.toggleBtn.textContent = "關閉電源";
                 els.toggleBtn.classList.replace('bg-indigo-600', 'bg-rose-600');
@@ -346,15 +367,17 @@
         }
 
         els.toggleBtn.onclick = () => {
-            if (state.powerW === 0) {
-                showSimpleAlert("提示", "請先選擇一個電器進行模擬。", "🔌");
+            const totalWatts = calculateTotalPower();
+            if (totalWatts === 0 && !state.isRunning) {
+                showSimpleAlert("提示", "請至少開啟一個電器進行模擬。", "🔌");
                 return;
             }
             if (state.isRunning) {
                 state.isRunning = false;
+                const activeApps = appliances.filter(app => state.selectedIds.includes(app.id));
                 updateUI();
                 if (state.totalSeconds > 0) {
-                    showDetailedCalculation(state.totalSeconds, state.powerW, state.label, state.icon, state.iconType);
+                    showDetailedCalculation(state.totalSeconds, totalWatts, activeApps);
                 }
             } else {
                 state.isRunning = true;
@@ -367,10 +390,13 @@
         function tick() {
             if (!state.isRunning) return;
             const now = Date.now();
+            const totalWatts = calculateTotalPower();
             const deltaTime = (now - state.lastTick) / 1000;
             const simTimeToAdd = deltaTime * state.speedMultiplier;
+            
             state.totalSeconds += simTimeToAdd;
-            state.totalKwh += (state.powerW / 1000) * (simTimeToAdd / 3600);
+            state.totalKwh += (totalWatts / 1000) * (simTimeToAdd / 3600);
+            
             state.lastTick = now;
             updateUI();
             requestAnimationFrame(tick);
@@ -380,6 +406,12 @@
             state.isRunning = false;
             state.totalKwh = 0;
             state.totalSeconds = 0;
+            state.selectedIds = [];
+            // 重設按鈕樣式
+            document.querySelectorAll('.appliance-item').forEach(btn => {
+                btn.classList.replace('border-indigo-500', 'border-slate-100');
+                btn.classList.remove('bg-indigo-50');
+            });
             updateUI();
         };
     </script>
